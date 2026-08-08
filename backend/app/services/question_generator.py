@@ -285,6 +285,7 @@ OUTPUT RULES:
     unless a short scenario is genuinely necessary.
 
 24. Keep the question concise.
+25. Start the question with exactly the words "INTERVIEW TEST:".
 
 Remember:
 
