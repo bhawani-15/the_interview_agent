@@ -893,11 +893,17 @@ Rules:
     )
 
     return {
-        "overall_score": round(
-            average,
-            1
-        ),
-        "strengths": [],
-        "weaknesses": [],
-        "recommendations": [],
-    }
+    "overall_score": round(
+        average,
+        1
+    ),
+    "strengths": [
+        "Completed the technical interview."
+    ],
+    "weaknesses": [
+        "Detailed feedback generation was unavailable."
+    ],
+    "recommendations": [
+        "Continue practicing the topics covered in the interview."
+    ],
+}
