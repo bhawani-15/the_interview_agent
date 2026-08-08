@@ -137,7 +137,6 @@ def fallback_question(selected_day):
 # =====================================================
 # QUESTION GENERATION FOR A SPECIFIC DAY
 # =====================================================
-
 def generate_question_for_day(
     name,
     job_role,
@@ -147,10 +146,8 @@ def generate_question_for_day(
     follow_up=False,
 ):
     """
-    Generate exactly one question for one curriculum day.
-
-    Gemini is strictly grounded in the supplied
-    title and objectives.
+    Generate exactly one clear, practical technical interview question
+    for one curriculum day.
     """
 
     previous_questions = previous_questions or []
@@ -163,23 +160,45 @@ def generate_question_for_day(
     if not previous_text:
         previous_text = "None"
 
-    question_type = (
-        "Ask ONE follow-up question about the same topic."
-        if follow_up
-        else "Ask ONE technical interview question."
-    )
+    if follow_up:
+        question_type = """
+Ask ONE natural follow-up question based on the
+candidate's previous discussion.
+
+The follow-up must stay on the same topic and should
+help the interviewer understand the candidate's
+knowledge more deeply.
+"""
+    else:
+        question_type = """
+Ask ONE realistic technical interview question.
+
+Prefer questions that are commonly useful in
+software engineering interviews, such as:
+- explaining a core concept
+- comparing two concepts
+- explaining how something works
+- solving a practical problem
+- explaining a real-world use case
+- debugging or reasoning about a situation
+"""
 
     prompt = f"""
-You are conducting a technical interview.
+You are a professional technical interviewer conducting
+a realistic software engineering interview.
 
-Candidate:
+Your goal is to ask a question that a real interviewer
+could naturally ask a candidate.
+
+CANDIDATE:
 Name: {name}
 Job Role: {job_role}
 Years of Experience: {years_experience}
 
 CURRENT CURRICULUM DAY:
 
-Day: {selected_day.get("day", "")}
+Day:
+{selected_day.get("day", "")}
 
 Title:
 {selected_day.get("title", "")}
@@ -190,90 +209,123 @@ Objectives:
 PREVIOUS QUESTIONS:
 {previous_text}
 
-STRICT GROUNDING RULES:
+QUESTION REQUIREMENTS:
 
-1. {question_type}
+{question_type}
 
-2. The question MUST clearly relate to this
-   specific curriculum day.
+IMPORTANT STYLE RULES:
 
-3. You may ONLY use information contained in
-   the curriculum TITLE and OBJECTIVES provided above.
+1. Use simple, clear and direct English.
 
-4. If a concept is not explicitly present in the
-   title or objectives, DO NOT ask about it.
+2. The candidate should understand the question
+   immediately after reading it once.
 
-5. Do NOT introduce unrelated technical concepts.
+3. Do NOT make the question unnecessarily difficult.
 
-6. Do NOT use concepts from other curriculum days.
+4. Do NOT use complicated academic language.
 
-7. Do NOT repeat any previous question.
+5. Do NOT use unnecessary words or long scenarios.
 
-8. Return exactly ONE question.
+6. Prefer natural interview wording such as:
+   "What is...?"
+   "How does...?"
+   "Why do we use...?"
+   "What is the difference between...?"
+   "How would you...?"
+   "Can you explain...?"
+   "What happens if...?"
 
-9. Return ONLY the question.
+7. The question should test understanding and reasoning,
+   not the candidate's ability to understand a complicated
+   question.
 
-10. Do not provide an answer.
+8. The question should feel like something a real
+   software engineering interviewer would ask.
 
-11. Do not provide an explanation.
+9. Difficulty should be appropriate for the candidate's
+   experience level.
 
-12. Do not add numbering or headings.
+10. For an experienced candidate, prefer practical
+    application and reasoning over very basic definitions.
 
-You may ONLY use information contained in the
-provided curriculum titles and objectives.
-If a concept is not explicitly present there,
-do not ask about it.
+11. Do not turn a straightforward concept into an
+    unnecessarily advanced or theoretical question.
+
+STRICT CURRICULUM RULES:
+
+12. The question MUST clearly relate to the current
+    curriculum day.
+
+13. You may ONLY use concepts explicitly supported by
+    the curriculum TITLE and OBJECTIVES above.
+
+14. If a concept is not explicitly present in the
+    title or objectives, DO NOT ask about it.
+
+15. Do NOT introduce unrelated technical concepts.
+
+16. Do NOT use concepts from other curriculum days.
+
+17. Do NOT repeat any previous question.
+
+OUTPUT RULES:
+
+18. Return exactly ONE question.
+
+19. Return ONLY the question.
+
+20. Do not provide an answer.
+
+21. Do not provide an explanation.
+
+22. Do not add numbering or headings.
+
+23. Do not use phrases such as:
+    "Consider the following scenario..."
+    unless a short scenario is genuinely necessary.
+
+24. Keep the question concise.
+
+Remember:
+
+A good interview question is NOT necessarily a difficult
+question.
+
+It should be clear, relevant, practical and capable of
+revealing how well the candidate understands the topic.
 """
 
     question = ""
 
     try:
-
         response = client.models.generate_content(
             model="gemini-3.6-flash",
             contents=prompt,
         )
 
-        question = extract_response_text(
-            response
-        )
+        question = extract_response_text(response)
 
     except Exception as error:
+        print(f"Question generation failed: {error}")
 
-        print(
-            f"Question generation failed: {error}"
-        )
-
-    # Retry once
+    # Retry only for errors other than quota/rate-limit errors.
     if not question:
-
         try:
-
             response = client.models.generate_content(
                 model="gemini-3.6-flash",
                 contents=prompt,
             )
 
-            question = extract_response_text(
-                response
-            )
+            question = extract_response_text(response)
 
         except Exception as error:
-
-            print(
-                f"Question retry failed: {error}"
-            )
+            print(f"Question retry failed: {error}")
 
     # Final fallback
     if not question:
-
-        question = fallback_question(
-            selected_day
-        )
+        question = fallback_question(selected_day)
 
     return question
-
-
 # =====================================================
 # FIRST QUESTION
 # =====================================================
