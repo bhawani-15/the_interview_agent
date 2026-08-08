@@ -108,29 +108,14 @@ Objectives: {day.get("objectives", "")}
 # =====================================================
 
 def fallback_question(selected_day):
-
     title = str(
         selected_day.get("title")
         or "this curriculum topic"
     ).strip()
 
-    objective = str(
-        selected_day.get("objectives")
-        or ""
-    ).strip()
-
-    if objective:
-
-        return (
-            f"Based on the objective "
-            f"'{objective}', can you explain "
-            f"how you would apply what you learned "
-            f"in {title}?"
-        )
-
     return (
-        f"Can you explain the key concepts "
-        f"covered in {title}?"
+        f"Can you explain the main idea behind "
+        f"{title}?"
     )
 
 
@@ -151,6 +136,31 @@ def generate_question_for_day(
     """
 
     previous_questions = previous_questions or []
+    # Select one objective instead of passing the entire
+    # curriculum objective list to the model.
+    objectives = str(
+        selected_day.get("objectives", "")
+    ).strip()
+
+    objective_list = [
+        objective.strip()
+        for objective in objectives.split(";")
+        if objective.strip()
+    ]
+
+    if objective_list:
+        objective_index = (
+            len(previous_questions)
+            % len(objective_list)
+        )
+
+        selected_objective = objective_list[
+            objective_index
+        ]
+    else:
+        selected_objective = (
+            selected_day.get("title", "")
+        )
 
     previous_text = "\n".join(
         f"- {question}"
@@ -203,8 +213,8 @@ Day:
 Title:
 {selected_day.get("title", "")}
 
-Objectives:
-{selected_day.get("objectives", "")}
+Selected Objective:
+{selected_objective}
 
 PREVIOUS QUESTIONS:
 {previous_text}
@@ -257,35 +267,43 @@ STRICT CURRICULUM RULES:
     curriculum day.
 
 13. You may ONLY use concepts explicitly supported by
-    the curriculum TITLE and OBJECTIVES above.
+    the SELECTED OBJECTIVE above.
 
-14. If a concept is not explicitly present in the
+14. Focus on this ONE objective only.
+
+15. Do not combine multiple objectives into one question.
+
+16. Do not mention the objective itself in the question.
+
+17. Do not copy the objective wording into the question.
+
+18. If a concept is not explicitly present in the
     title or objectives, DO NOT ask about it.
 
-15. Do NOT introduce unrelated technical concepts.
+19. Do NOT introduce unrelated technical concepts.
 
-16. Do NOT use concepts from other curriculum days.
+20. Do NOT use concepts from other curriculum days.
 
-17. Do NOT repeat any previous question.
+21. Do NOT repeat any previous question.
 
 OUTPUT RULES:
 
-18. Return exactly ONE question.
+22. Return exactly ONE question.
 
-19. Return ONLY the question.
+23. Return ONLY the question.
 
-20. Do not provide an answer.
+24. Do not provide an answer.
 
-21. Do not provide an explanation.
+25. Do not provide an explanation.
 
-22. Do not add numbering or headings.
+26. Do not add numbering or headings.
 
-23. Do not use phrases such as:
+27. Do not use phrases such as:
     "Consider the following scenario..."
     unless a short scenario is genuinely necessary.
 
-24. Keep the question concise.
-25. Start the question with exactly the words "INTERVIEW TEST:".
+28. Keep the question concise.
+29. Start the question with exactly the words "INTERVIEW TEST:".
 
 Remember:
 
@@ -636,6 +654,8 @@ def generate_question_for_day(
     """
 
     previous_questions = previous_questions or []
+
+    print(">>> NEW QUESTION GENERATOR IS RUNNING <<<")
 
     previous_text = "\n".join(
         f"- {question}"
