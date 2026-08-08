@@ -1,4 +1,4 @@
-from schemas.interview import InterviewResponse
+from backend.app.schemas.interview import InterviewResponse
 
 
 def interview_reply() -> InterviewResponse:

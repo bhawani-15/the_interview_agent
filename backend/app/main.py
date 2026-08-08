@@ -1,5 +1,6 @@
 from fastapi import FastAPI
-from api.interview import router as interview_router
+
+from backend.app.api.interview import router as interview_router
 
 app = FastAPI(
     title="AI Interview Agent",
