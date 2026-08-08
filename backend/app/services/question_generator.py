@@ -630,6 +630,11 @@ def generate_question_for_day(
     previous_questions=None,
     follow_up=False,
 ):
+    """
+    Generate exactly one clear, practical technical interview question
+    for one curriculum day.
+    """
+
     previous_questions = previous_questions or []
 
     previous_text = "\n".join(
@@ -641,26 +646,44 @@ def generate_question_for_day(
         previous_text = "None"
 
     if follow_up:
-        instruction = (
-            "Ask ONE follow-up question that clarifies "
-            "the candidate's previous answer."
-        )
+        question_type = """
+Ask ONE natural follow-up question based on the
+candidate's previous discussion.
+
+The follow-up must stay on the same topic and help
+the interviewer understand the candidate's knowledge
+more deeply.
+"""
     else:
-        instruction = (
-            "Ask ONE new technical interview question."
-        )
+        question_type = """
+Ask ONE realistic technical interview question.
+
+Prefer questions that are commonly useful in
+software engineering interviews, such as:
+- explaining a core concept
+- comparing two concepts
+- explaining how something works
+- solving a practical problem
+- explaining a real-world use case
+- debugging or reasoning about a situation
+"""
 
     prompt = f"""
-You are conducting a technical interview.
+You are a professional technical interviewer conducting
+a realistic software engineering interview.
 
-Candidate:
+Your goal is to ask a question that a real interviewer
+could naturally ask a candidate.
+
+CANDIDATE:
 Name: {name}
 Job Role: {job_role}
 Years of Experience: {years_experience}
 
 CURRENT CURRICULUM DAY:
 
-Day: {selected_day.get("day", "")}
+Day:
+{selected_day.get("day", "")}
 
 Title:
 {selected_day.get("title", "")}
@@ -671,28 +694,88 @@ Objectives:
 PREVIOUS QUESTIONS:
 {previous_text}
 
-TASK:
-{instruction}
+QUESTION REQUIREMENTS:
 
-STRICT RULES:
+{question_type}
 
-1. The question MUST be about this curriculum day.
-2. You may ONLY use information explicitly contained
-   in the curriculum TITLE and OBJECTIVES above.
-3. If a concept is not explicitly present there,
-   DO NOT ask about it.
-4. Do not introduce unrelated technical concepts.
-5. Do not use concepts from another curriculum day.
-6. Do not repeat a previous question.
-7. Ask exactly ONE question.
-8. Return ONLY the question.
-9. Do not provide an answer.
-10. Do not provide an explanation.
+IMPORTANT STYLE RULES:
 
-You may ONLY use information contained in the
-provided curriculum titles and objectives.
-If a concept is not explicitly present there,
-do not ask about it.
+1. Use simple, clear and direct English.
+
+2. The candidate should understand the question
+   immediately after reading it once.
+
+3. Do NOT make the question unnecessarily difficult.
+
+4. Do NOT use complicated academic language.
+
+5. Do NOT use unnecessary words or long scenarios.
+
+6. Prefer natural interview wording such as:
+   "What is...?"
+   "How does...?"
+   "Why do we use...?"
+   "What is the difference between...?"
+   "How would you...?"
+   "Can you explain...?"
+   "What happens if...?"
+
+7. The question should test understanding and reasoning,
+   not the candidate's ability to understand a complicated
+   question.
+
+8. The question should feel like something a real
+   software engineering interviewer would ask.
+
+9. Difficulty should be appropriate for the candidate's
+   experience level.
+
+10. For an experienced candidate, prefer practical
+    application and reasoning over very basic definitions.
+
+11. Do not turn a straightforward concept into an
+    unnecessarily advanced or theoretical question.
+
+STRICT CURRICULUM RULES:
+
+12. The question MUST clearly relate to the current
+    curriculum day.
+
+13. You may ONLY use concepts explicitly supported by
+    the curriculum TITLE and OBJECTIVES above.
+
+14. If a concept is not explicitly present in the
+    title or objectives, DO NOT ask about it.
+
+15. Do NOT introduce unrelated technical concepts.
+
+16. Do NOT use concepts from other curriculum days.
+
+17. Do NOT repeat any previous question.
+
+OUTPUT RULES:
+
+18. Return exactly ONE question.
+
+19. Return ONLY the question.
+
+20. Do not provide an answer.
+
+21. Do not provide an explanation.
+
+22. Do not add numbering or headings.
+
+23. Do not use phrases such as:
+    "Consider the following scenario..."
+    unless a short scenario is genuinely necessary.
+
+24. Keep the question concise.
+
+A good interview question is NOT necessarily a difficult
+question.
+
+It should be clear, relevant, practical and capable of
+revealing how well the candidate understands the topic.
 """
 
     question = ""
@@ -723,27 +806,7 @@ do not ask about it.
 
     # Final fallback
     if not question:
-        objective = str(
-            selected_day.get("objectives")
-            or ""
-        ).strip()
-
-        title = str(
-            selected_day.get("title")
-            or "this topic"
-        ).strip()
-
-        if objective:
-            question = (
-                f"Can you explain how you would apply "
-                f"the objective '{objective}' in "
-                f"{title}?"
-            )
-        else:
-            question = (
-                f"Can you explain the key concepts "
-                f"covered in {title}?"
-            )
+        question = fallback_question(selected_day)
 
     return question
 
