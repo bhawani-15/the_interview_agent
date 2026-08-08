@@ -1,19 +1,16 @@
+import os
 from pathlib import Path
 import json
 
-from dotenv import dotenv_values
+from dotenv import load_dotenv
 from google import genai
 
 
-# -----------------------------------------------------
-# Load Gemini API key directly from backend/.env
-# -----------------------------------------------------
-
+# Load local .env when running locally
 BASE_DIR = Path(__file__).resolve().parents[2]
+load_dotenv(BASE_DIR / ".env")
 
-env = dotenv_values(BASE_DIR / ".env")
-
-api_key = env.get("GEMINI_API_KEY")
+api_key = os.getenv("GEMINI_API_KEY")
 
 if not api_key:
     raise RuntimeError("GEMINI_API_KEY is not set")
