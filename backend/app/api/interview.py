@@ -24,15 +24,19 @@ from backend.app.services.question_generator import (
 
 router = APIRouter(
     prefix="/api",
-    tags=["Interview"]
+    tags=["Interview"],
 )
 
 
 # =========================================================
-# Candidate helpers
+# CANDIDATE HELPERS
 # =========================================================
 
 def get_candidates_list(candidates):
+    """
+    Support the actual candidates.json structure and
+    common fallback structures.
+    """
 
     if isinstance(candidates, list):
         return candidates
@@ -53,10 +57,15 @@ def get_candidates_list(candidates):
 
 
 def get_candidate_id(candidate):
+    """
+    Candidate ID may exist directly on the candidate
+    or inside candidate["member"].
+    """
 
     if not isinstance(candidate, dict):
         return None
 
+    # Direct ID
     for key in (
         "id",
         "candidateId",
@@ -69,6 +78,8 @@ def get_candidate_id(candidate):
         if value is not None:
             return str(value)
 
+    # Actual candidates.json structure:
+    # candidate["member"]["id"]
     member = candidate.get("member")
 
     if isinstance(member, dict):
@@ -89,6 +100,24 @@ def get_candidate_id(candidate):
 
 
 def normalize_candidate(candidate):
+    """
+    Convert the actual candidate structure:
+
+        {
+            "member": {...},
+            "missions": [...]
+        }
+
+    into:
+
+        {
+            "id": ...,
+            "name": ...,
+            "jobRole": ...,
+            "yearsExperience": ...,
+            "missions": [...]
+        }
+    """
 
     if not isinstance(candidate, dict):
         return None
@@ -101,7 +130,7 @@ def normalize_candidate(candidate):
 
         normalized["missions"] = candidate.get(
             "missions",
-            []
+            [],
         )
 
         return normalized
@@ -113,6 +142,9 @@ def find_candidate_by_id(
     candidates,
     candidate_id,
 ):
+    """
+    Find the full candidate record from candidates.json.
+    """
 
     if candidate_id is None:
         return None
@@ -140,7 +172,7 @@ def find_candidate_by_id(
 
 
 # =========================================================
-# Mission helpers
+# MISSION HELPERS
 # =========================================================
 
 def get_missions(candidate):
@@ -150,17 +182,22 @@ def get_missions(candidate):
 
     missions = candidate.get(
         "missions",
-        []
+        [],
     )
 
-    return (
-        missions
-        if isinstance(missions, list)
-        else []
-    )
+    if isinstance(missions, list):
+        return missions
+
+    return []
 
 
 def get_completed_missions(candidate):
+    """
+    Only missions satisfying:
+
+        passed == true
+        skipped != true
+    """
 
     return [
         mission
@@ -197,7 +234,7 @@ def get_mission_day(mission):
 
 
 # =========================================================
-# Curriculum helpers
+# CURRICULUM HELPERS
 # =========================================================
 
 def get_curriculum_days(curriculum):
@@ -279,6 +316,10 @@ def find_completed_curriculum_days(
     candidate,
     curriculum,
 ):
+    """
+    Match only passed and non-skipped missions
+    to their curriculum days.
+    """
 
     completed_missions = (
         get_completed_missions(candidate)
@@ -336,49 +377,63 @@ def find_completed_curriculum_days(
 
 
 # =========================================================
-# Session helpers
+# SESSION HELPERS
 # =========================================================
 
 def initialize_session_state(session):
+    """
+    Make sure existing sessions have all fields required
+    for the multi-turn interview.
+    """
 
     session.setdefault(
         "question_count",
-        0
+        0,
     )
 
     session.setdefault(
         "questions",
-        []
+        [],
     )
 
     session.setdefault(
         "answers",
-        []
+        [],
     )
 
     session.setdefault(
         "covered_days",
-        []
+        [],
     )
 
     session.setdefault(
         "history",
-        []
+        [],
     )
 
     session.setdefault(
-        "current_question_day",
-        None
+        "evaluations",
+        [],
     )
 
     session.setdefault(
         "current_question",
-        None
+        None,
+    )
+
+    session.setdefault(
+        "current_question_day",
+        None,
     )
 
     session.setdefault(
         "feedback",
-        None
+        None,
+    )
+
+    session.setdefault(
+        "follow_up_used",
+        False,
     )
 
 
@@ -386,50 +441,47 @@ def question_already_asked(
     session,
     question,
 ):
+    """
+    Prevent exact question repetition.
+    """
 
-    normalized = question.strip().lower()
+    if not question:
+        return True
+
+    normalized = (
+        question.strip().lower()
+    )
 
     return any(
-        q.strip().lower() == normalized
-        for q in session.get(
+        existing.strip().lower()
+        == normalized
+        for existing in session.get(
             "questions",
-            []
+            [],
         )
     )
 
 
-def get_next_curriculum_day(
+def find_day_by_id(
     completed_days,
-    covered_days,
+    day_id,
 ):
-
-    covered = {
-        str(day)
-        for day in covered_days
-    }
-
-    # Prefer an entirely new curriculum day.
     for day in completed_days:
 
-        day_id = day.get("day")
-
-        if str(day_id) not in covered:
+        if str(day.get("day")) == str(day_id):
             return day
 
-    # If all days have been covered,
-    # return the first one. The question itself
-    # will still be prevented from repeating.
-    return (
-        completed_days[0]
-        if completed_days
-        else None
-    )
+    return None
 
 
-def get_different_day(
+def get_uncovered_day(
     completed_days,
     covered_days,
 ):
+    """
+    Prefer a curriculum day that has not yet
+    been covered.
+    """
 
     covered = {
         str(day)
@@ -444,6 +496,40 @@ def get_different_day(
     return None
 
 
+def get_next_available_day(
+    completed_days,
+    covered_days,
+    question_count,
+):
+    """
+    Once all days have been covered, choose a day
+    again only when necessary to reach 8 questions.
+    """
+
+    if not completed_days:
+        return None
+
+    covered = {
+        str(day)
+        for day in covered_days
+    }
+
+    # Prefer uncovered days.
+    for day in completed_days:
+
+        if str(day.get("day")) not in covered:
+            return day
+
+    # All days have been covered.
+    # Reuse a day only because reaching 8 questions
+    # may require it.
+    index = (
+        question_count - 1
+    ) % len(completed_days)
+
+    return completed_days[index]
+
+
 # =========================================================
 # POST /api/interview
 # =========================================================
@@ -452,10 +538,17 @@ def get_different_day(
     "/interview",
     response_model=InterviewResponse,
 )
-def interview(request: InterviewRequest):
+def interview(
+    request: InterviewRequest,
+):
 
     # =====================================================
-    # 1. NEW SESSION
+    # NEW SESSION
+    # =====================================================
+    #
+    # A request containing `candidate` starts an interview.
+    #
+    # This path happens BEFORE the existing-session lookup.
     # =====================================================
 
     if request.candidate is not None:
@@ -473,7 +566,7 @@ def interview(request: InterviewRequest):
             )
 
         # -------------------------------------------------
-        # Find full candidate
+        # Try to find the complete candidate record
         # -------------------------------------------------
 
         candidate_id = get_candidate_id(
@@ -492,7 +585,7 @@ def interview(request: InterviewRequest):
             )
 
         # -------------------------------------------------
-        # Fallback
+        # If lookup fails, use supplied candidate
         # -------------------------------------------------
 
         if candidate is None:
@@ -502,7 +595,7 @@ def interview(request: InterviewRequest):
             )
 
         # -------------------------------------------------
-        # Create session FIRST
+        # Create session BEFORE generating question
         # -------------------------------------------------
 
         session = session_manager.create_session(
@@ -539,7 +632,7 @@ def interview(request: InterviewRequest):
             )
 
         # -------------------------------------------------
-        # Candidate details
+        # Candidate information
         # -------------------------------------------------
 
         name = candidate.get(
@@ -583,7 +676,7 @@ def interview(request: InterviewRequest):
             })
 
         # -------------------------------------------------
-        # Generate first question
+        # Generate FIRST question
         # -------------------------------------------------
 
         (
@@ -598,7 +691,44 @@ def interview(request: InterviewRequest):
         )
 
         # -------------------------------------------------
-        # Store question
+        # Safety: never allow empty question
+        # -------------------------------------------------
+
+        if not question:
+
+            selected_day_data = (
+                find_day_by_id(
+                    completed_days,
+                    selected_day,
+                )
+            )
+
+            if selected_day_data is not None:
+
+                objective = (
+                    selected_day_data.get(
+                        "objectives"
+                    )
+                    or selected_day_data.get(
+                        "title"
+                    )
+                    or "this curriculum topic"
+                )
+
+                question = (
+                    f"Can you explain what you "
+                    f"understood about {objective}?"
+                )
+
+            else:
+
+                question = (
+                    "Can you explain one of "
+                    "the completed curriculum topics?"
+                )
+
+        # -------------------------------------------------
+        # Store first question
         # -------------------------------------------------
 
         session["question_count"] = 1
@@ -611,13 +741,21 @@ def interview(request: InterviewRequest):
             selected_day
         ]
 
+        session["current_question"] = (
+            question
+        )
+
         session["current_question_day"] = (
             selected_day
         )
 
-        session["current_question"] = (
-            question
-        )
+        session["follow_up_used"] = False
+
+        # -------------------------------------------------
+        # IMPORTANT:
+        # Return the actual question.
+        # Never reply="".
+        # -------------------------------------------------
 
         return InterviewResponse(
             reply=question,
@@ -625,7 +763,7 @@ def interview(request: InterviewRequest):
         )
 
     # =====================================================
-    # 2. EXISTING SESSION
+    # EXISTING SESSION
     # =====================================================
 
     session = session_manager.get_session(
@@ -646,6 +784,10 @@ def interview(request: InterviewRequest):
         session
     )
 
+    # -----------------------------------------------------
+    # Candidate answer
+    # -----------------------------------------------------
+
     answer = (
         request.message or ""
     ).strip()
@@ -653,17 +795,16 @@ def interview(request: InterviewRequest):
     if not answer:
 
         return InterviewResponse(
-            reply="Please provide an answer.",
+            reply=(
+                "Please provide an answer "
+                "to the current question."
+            ),
             done=False,
         )
 
-    # =====================================================
-    # SAVE ANSWER
-    # =====================================================
-
-    session["answers"].append(
-        answer
-    )
+    # -----------------------------------------------------
+    # Get current question/day
+    # -----------------------------------------------------
 
     current_question = (
         session.get(
@@ -680,27 +821,30 @@ def interview(request: InterviewRequest):
         "current_question_day"
     )
 
+    # -----------------------------------------------------
+    # Save answer
+    # -----------------------------------------------------
+
+    session["answers"].append(
+        answer
+    )
+
     # =====================================================
-    # LOAD CURRICULUM AGAIN
+    # LOAD CURRICULUM
     # =====================================================
 
     curriculum = load_curriculum()
-
-    candidate = session.get(
-        "candidate",
-        {}
-    )
 
     (
         completed_days,
         _,
     ) = find_completed_curriculum_days(
-        candidate,
+        session["candidate"],
         curriculum,
     )
 
     # =====================================================
-    # EVALUATE ANSWER
+    # EVALUATE ANSWER WITH GEMINI
     # =====================================================
 
     evaluation = evaluate_answer(
@@ -709,11 +853,19 @@ def interview(request: InterviewRequest):
         curriculum_day=current_day,
     )
 
-    # =====================================================
-    # ADD QUESTION + ANSWER TO HISTORY
-    # =====================================================
+    # -----------------------------------------------------
+    # Store evaluation
+    # -----------------------------------------------------
 
-    history_item = {
+    session["evaluations"].append(
+        evaluation
+    )
+
+    # -----------------------------------------------------
+    # Store complete history
+    # -----------------------------------------------------
+
+    session["history"].append({
         "question": current_question,
         "answer": answer,
         "day": current_day,
@@ -725,14 +877,10 @@ def interview(request: InterviewRequest):
             "reason",
             "",
         ),
-    }
-
-    session["history"].append(
-        history_item
-    )
+    })
 
     # =====================================================
-    # CHECK WHETHER INTERVIEW IS FINISHED
+    # CHECK WHETHER INTERVIEW CAN END
     # =====================================================
 
     question_count = session[
@@ -740,21 +888,19 @@ def interview(request: InterviewRequest):
     ]
 
     covered_count = len(
-        set(
+        {
             str(day)
             for day in session[
                 "covered_days"
             ]
-        )
+        }
     )
 
-    # We can only finish after BOTH conditions:
-    # - at least 8 questions
-    # - at least 4 curriculum days
+    # Must have:
+    #   >= 8 questions
+    #   >= 4 curriculum days
     #
-    # Since the current answer belongs to the
-    # current question, question_count already
-    # represents the number of questions asked.
+    # Only then is the interview complete.
 
     if (
         question_count >= 8
@@ -762,26 +908,29 @@ def interview(request: InterviewRequest):
     ):
 
         feedback = generate_feedback(
-            candidate=candidate,
-            history=session["history"],
+            candidate=session[
+                "candidate"
+            ],
+            history=session[
+                "history"
+            ],
         )
 
         session["feedback"] = feedback
 
         return InterviewResponse(
-            reply="Interview completed.",
+            reply="Interview complete",
             done=True,
             feedback=feedback,
         )
 
     # =====================================================
-    # DECIDE NEXT QUESTION
+    # CANDIDATE INFORMATION
     # =====================================================
 
-    needs_follow_up = evaluation.get(
-        "needs_clarification",
-        False,
-    )
+    candidate = session[
+        "candidate"
+    ]
 
     name = candidate.get(
         "name",
@@ -798,30 +947,40 @@ def interview(request: InterviewRequest):
         0,
     )
 
-    # -----------------------------------------------------
-    # FOLLOW-UP
-    # -----------------------------------------------------
+    # =====================================================
+    # FOLLOW-UP LOGIC
+    # =====================================================
+    #
+    # A weak/incomplete answer gets at most ONE follow-up
+    # on the same curriculum day.
+    # =====================================================
 
-    if needs_follow_up:
+    needs_follow_up = evaluation.get(
+        "needs_clarification",
+        False,
+    )
 
-        selected_day = next(
-            (
-                day
-                for day in completed_days
-                if str(day.get("day"))
-                == str(current_day)
-            ),
-            None,
+    if (
+        needs_follow_up
+        and not session.get(
+            "follow_up_used",
+            False,
+        )
+    ):
+
+        same_day = find_day_by_id(
+            completed_days,
+            current_day,
         )
 
-        if selected_day is not None:
+        if same_day is not None:
 
-            next_question = (
+            follow_up = (
                 generate_question_for_day(
                     name=name,
                     job_role=job_role,
                     years_experience=years_experience,
-                    selected_day=selected_day,
+                    selected_day=same_day,
                     previous_questions=session[
                         "questions"
                     ],
@@ -829,10 +988,13 @@ def interview(request: InterviewRequest):
                 )
             )
 
-            # Never repeat a question.
-            if not question_already_asked(
-                session,
-                next_question,
+            # Never repeat.
+            if (
+                follow_up
+                and not question_already_asked(
+                    session,
+                    follow_up,
+                )
             ):
 
                 session[
@@ -842,56 +1004,70 @@ def interview(request: InterviewRequest):
                 session[
                     "questions"
                 ].append(
-                    next_question
+                    follow_up
                 )
 
                 session[
                     "current_question"
-                ] = next_question
+                ] = follow_up
 
                 session[
                     "current_question_day"
-                ] = selected_day.get(
-                    "day"
-                )
+                ] = current_day
 
+                session[
+                    "follow_up_used"
+                ] = True
+
+                # IMPORTANT:
+                # Return the actual follow-up question.
                 return InterviewResponse(
-                    reply=next_question,
+                    reply=follow_up,
                     done=False,
                 )
 
     # =====================================================
-    # MOVE TO DIFFERENT CURRICULUM DAY
+    # MOVE TO ANOTHER CURRICULUM DAY
     # =====================================================
 
-    selected_day = get_different_day(
+    selected_day = get_uncovered_day(
         completed_days,
         session["covered_days"],
     )
 
-    # If there are no uncovered days left,
-    # choose another completed day.
+    # -----------------------------------------------------
+    # If all days have already been covered,
+    # reuse a day only because we still need questions
+    # to reach the minimum of 8.
+    # -----------------------------------------------------
+
     if selected_day is None:
 
-        selected_day = get_next_curriculum_day(
+        selected_day = get_next_available_day(
             completed_days,
             session["covered_days"],
+            session["question_count"],
         )
 
     if selected_day is None:
 
-        return InterviewResponse(
-            reply="Interview completed.",
-            done=True,
-            feedback=generate_feedback(
-                candidate=candidate,
-                history=session["history"],
-            ),
+        # Extremely defensive fallback.
+        feedback = generate_feedback(
+            candidate=candidate,
+            history=session["history"],
         )
 
-    # -----------------------------------------------------
-    # Generate new-topic question
-    # -----------------------------------------------------
+        session["feedback"] = feedback
+
+        return InterviewResponse(
+            reply="Interview complete",
+            done=True,
+            feedback=feedback,
+        )
+
+    # =====================================================
+    # GENERATE NEXT QUESTION
+    # =====================================================
 
     next_question = generate_question_for_day(
         name=name,
@@ -905,17 +1081,17 @@ def interview(request: InterviewRequest):
     )
 
     # -----------------------------------------------------
-    # Safety: never repeat
+    # Never repeat a question
     # -----------------------------------------------------
 
-    attempts = 0
+    retry_count = 0
 
     while (
         question_already_asked(
             session,
             next_question,
         )
-        and attempts < 2
+        and retry_count < 2
     ):
 
         next_question = generate_question_for_day(
@@ -929,15 +1105,40 @@ def interview(request: InterviewRequest):
             follow_up=False,
         )
 
-        attempts += 1
+        retry_count += 1
 
     # -----------------------------------------------------
-    # Store new question
+    # Absolute fallback if Gemini somehow gives nothing
     # -----------------------------------------------------
 
-    session["question_count"] += 1
+    if not next_question:
 
-    session["questions"].append(
+        objective = (
+            selected_day.get(
+                "objectives"
+            )
+            or selected_day.get(
+                "title"
+            )
+            or "this curriculum topic"
+        )
+
+        next_question = (
+            f"Can you explain what you "
+            f"understood about {objective}?"
+        )
+
+    # -----------------------------------------------------
+    # Store next question
+    # -----------------------------------------------------
+
+    session[
+        "question_count"
+    ] += 1
+
+    session[
+        "questions"
+    ].append(
         next_question
     )
 
@@ -945,9 +1146,13 @@ def interview(request: InterviewRequest):
         "day"
     )
 
-    if day_id not in session[
-        "covered_days"
-    ]:
+    # Add day to coverage only once.
+    if str(day_id) not in {
+        str(day)
+        for day in session[
+            "covered_days"
+        ]
+    }:
 
         session[
             "covered_days"
@@ -956,14 +1161,181 @@ def interview(request: InterviewRequest):
         )
 
     session[
+        "current_question"
+    ] = next_question
+
+    session[
         "current_question_day"
     ] = day_id
 
+    # A new curriculum day gets a fresh
+    # follow-up opportunity.
     session[
-        "current_question"
-    ] = next_question
+        "follow_up_used"
+    ] = False
+
+    # =====================================================
+    # NORMAL TURN
+    # =====================================================
+    #
+    # Return the ACTUAL next question.
+    # NEVER return reply="".
+    # =====================================================
 
     return InterviewResponse(
         reply=next_question,
         done=False,
     )
+    # =========================================================
+# TEMPORARY LOCAL TEST HELPER
+# =========================================================
+
+def simulate_8_question_interview(
+    candidate_id="CAND-003",
+    session_id="TEST-SESSION-001",
+):
+    """
+    Temporary local test helper.
+
+    Simulates an interview by:
+    1. Starting a new session.
+    2. Sending candidate answers repeatedly.
+    3. Printing each generated question.
+    4. Verifying that the interview reaches done=True.
+    5. Printing the final feedback.
+
+    This is NOT a FastAPI endpoint.
+    """
+
+    print("\n" + "=" * 60)
+    print("STARTING INTERVIEW SIMULATION")
+    print("=" * 60)
+
+    # -----------------------------------------------------
+    # Start a new interview
+    # -----------------------------------------------------
+
+    start_request = InterviewRequest(
+        sessionId=session_id,
+        candidate={
+            "id": candidate_id
+        },
+    )
+
+    response = interview(start_request)
+
+    print("\nQUESTION 1:")
+    print(response.reply)
+
+    if response.done:
+        print("ERROR: Interview ended too early.")
+        return response
+
+    # -----------------------------------------------------
+    # Simulated candidate answers
+    # -----------------------------------------------------
+
+    test_answers = [
+        "I understand the concept and can explain how it works.",
+        "I would apply this concept by following the approach covered in the curriculum.",
+        "The main idea is to use the concepts from this topic to solve the given problem.",
+        "I would consider the important steps and objectives covered in this curriculum day.",
+        "The concept can be applied by following the process described in the topic.",
+        "I understand the main principles and how they relate to the objective.",
+        "I would use this knowledge when implementing the solution described by the curriculum.",
+        "I can explain the concept and its practical application based on what I learned.",
+    ]
+
+    # -----------------------------------------------------
+    # Send answers
+    # -----------------------------------------------------
+
+    for index, answer in enumerate(
+        test_answers,
+        start=1,
+    ):
+
+        print("\n" + "-" * 60)
+
+        print(
+            f"SENDING ANSWER {index}:"
+        )
+
+        print(answer)
+
+        request = InterviewRequest(
+            sessionId=session_id,
+            message=answer,
+        )
+
+        response = interview(request)
+
+        print(
+            f"\nRESPONSE AFTER ANSWER {index}:"
+        )
+
+        print(
+            f"reply: {response.reply}"
+        )
+
+        print(
+            f"done: {response.done}"
+        )
+
+        # -------------------------------------------------
+        # Stop when interview finishes
+        # -------------------------------------------------
+
+        if response.done:
+
+            print("\n" + "=" * 60)
+            print("INTERVIEW COMPLETED")
+            print("=" * 60)
+
+            print(
+                "\nFINAL FEEDBACK:"
+            )
+
+            print(
+                response.feedback
+            )
+
+            return response
+
+    # -----------------------------------------------------
+    # Verify completion
+    # -----------------------------------------------------
+
+    print("\n" + "=" * 60)
+
+    if response.done:
+
+        print(
+            "TEST PASSED: done=True"
+        )
+
+    else:
+
+        print(
+            "TEST FAILED: Interview did not reach done=True."
+        )
+
+        session = session_manager.get_session(
+            session_id
+        )
+
+        if session:
+
+            print(
+                f"Questions asked: "
+                f"{session.get('question_count', 0)}"
+            )
+
+            print(
+                f"Curriculum days covered: "
+                f"{session.get('covered_days', [])}"
+            )
+
+    print("=" * 60)
+
+    return response

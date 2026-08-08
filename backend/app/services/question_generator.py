@@ -568,3 +568,339 @@ Rules:
             "Continue practicing the completed curriculum topics."
         ],
     }
+    # =====================================================
+# GENERATE QUESTION FOR A SPECIFIC CURRICULUM DAY
+# =====================================================
+
+def generate_question_for_day(
+    name,
+    job_role,
+    years_experience,
+    selected_day,
+    previous_questions=None,
+    follow_up=False,
+):
+    previous_questions = previous_questions or []
+
+    previous_text = "\n".join(
+        f"- {question}"
+        for question in previous_questions
+    )
+
+    if not previous_text:
+        previous_text = "None"
+
+    if follow_up:
+        instruction = (
+            "Ask ONE follow-up question that clarifies "
+            "the candidate's previous answer."
+        )
+    else:
+        instruction = (
+            "Ask ONE new technical interview question."
+        )
+
+    prompt = f"""
+You are conducting a technical interview.
+
+Candidate:
+Name: {name}
+Job Role: {job_role}
+Years of Experience: {years_experience}
+
+CURRENT CURRICULUM DAY:
+
+Day: {selected_day.get("day", "")}
+
+Title:
+{selected_day.get("title", "")}
+
+Objectives:
+{selected_day.get("objectives", "")}
+
+PREVIOUS QUESTIONS:
+{previous_text}
+
+TASK:
+{instruction}
+
+STRICT RULES:
+
+1. The question MUST be about this curriculum day.
+2. You may ONLY use information explicitly contained
+   in the curriculum TITLE and OBJECTIVES above.
+3. If a concept is not explicitly present there,
+   DO NOT ask about it.
+4. Do not introduce unrelated technical concepts.
+5. Do not use concepts from another curriculum day.
+6. Do not repeat a previous question.
+7. Ask exactly ONE question.
+8. Return ONLY the question.
+9. Do not provide an answer.
+10. Do not provide an explanation.
+
+You may ONLY use information contained in the
+provided curriculum titles and objectives.
+If a concept is not explicitly present there,
+do not ask about it.
+"""
+
+    question = ""
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-3.6-flash",
+            contents=prompt,
+        )
+
+        question = extract_response_text(response)
+
+    except Exception as error:
+        print(f"Question generation failed: {error}")
+
+    # Retry once
+    if not question:
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.6-flash",
+                contents=prompt,
+            )
+
+            question = extract_response_text(response)
+
+        except Exception as error:
+            print(f"Question retry failed: {error}")
+
+    # Final fallback
+    if not question:
+        objective = str(
+            selected_day.get("objectives")
+            or ""
+        ).strip()
+
+        title = str(
+            selected_day.get("title")
+            or "this topic"
+        ).strip()
+
+        if objective:
+            question = (
+                f"Can you explain how you would apply "
+                f"the objective '{objective}' in "
+                f"{title}?"
+            )
+        else:
+            question = (
+                f"Can you explain the key concepts "
+                f"covered in {title}?"
+            )
+
+    return question
+
+
+# =====================================================
+# EVALUATE CANDIDATE ANSWER
+# =====================================================
+
+def evaluate_answer(
+    question,
+    answer,
+    curriculum_day,
+):
+    prompt = f"""
+Evaluate this technical interview answer.
+
+Curriculum day:
+{curriculum_day}
+
+Question:
+{question}
+
+Candidate answer:
+{answer}
+
+Return ONLY valid JSON:
+
+{{
+    "score": 0,
+    "needs_clarification": false,
+    "reason": ""
+}}
+
+Rules:
+- score must be from 0 to 10.
+- needs_clarification is true if the answer is
+  weak, incomplete, vague, or incorrect.
+- needs_clarification is false if the answer
+  adequately addresses the question.
+- Evaluate only against the question and curriculum topic.
+"""
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-3.6-flash",
+            contents=prompt,
+        )
+
+        text = extract_response_text(response)
+
+        if text:
+            text = (
+                text
+                .replace("```json", "")
+                .replace("```", "")
+                .strip()
+            )
+
+            result = json.loads(text)
+
+            return {
+                "score": int(
+                    result.get("score", 0)
+                ),
+                "needs_clarification": bool(
+                    result.get(
+                        "needs_clarification",
+                        False
+                    )
+                ),
+                "reason": str(
+                    result.get("reason", "")
+                ),
+            }
+
+    except Exception as error:
+        print(
+            f"Answer evaluation failed: {error}"
+        )
+
+    # Safe fallback
+    if len(answer.strip()) < 20:
+        return {
+            "score": 3,
+            "needs_clarification": True,
+            "reason": "Answer is too short or incomplete."
+        }
+
+    return {
+        "score": 6,
+        "needs_clarification": False,
+        "reason": "Answer appears sufficiently detailed."
+    }
+
+
+# =====================================================
+# GENERATE FINAL FEEDBACK
+# =====================================================
+
+def generate_feedback(
+    candidate,
+    history,
+):
+    history_text = ""
+
+    for item in history:
+        history_text += f"""
+Question: {item.get("question", "")}
+Answer: {item.get("answer", "")}
+Curriculum Day: {item.get("day", "")}
+Score: {item.get("score", 0)}
+Evaluation: {item.get("evaluation", "")}
+
+---
+"""
+
+    prompt = f"""
+Generate final technical interview feedback.
+
+Candidate:
+Name: {candidate.get("name", "Candidate")}
+Role: {candidate.get("jobRole", "Technical")}
+Experience: {candidate.get("yearsExperience", 0)} years
+
+COMPLETE INTERVIEW HISTORY:
+
+{history_text}
+
+Return ONLY valid JSON:
+
+{{
+    "overall_score": 0,
+    "strengths": [],
+    "weaknesses": [],
+    "recommendations": []
+}}
+
+Rules:
+- overall_score must be between 0 and 10.
+- strengths must be a list of strings.
+- weaknesses must be a list of strings.
+- recommendations must be a list of strings.
+- Base feedback only on the interview history.
+"""
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-3.6-flash",
+            contents=prompt,
+        )
+
+        text = extract_response_text(response)
+
+        if text:
+            text = (
+                text
+                .replace("```json", "")
+                .replace("```", "")
+                .strip()
+            )
+
+            result = json.loads(text)
+
+            return {
+                "overall_score": float(
+                    result.get(
+                        "overall_score",
+                        0
+                    )
+                ),
+                "strengths": result.get(
+                    "strengths",
+                    []
+                ),
+                "weaknesses": result.get(
+                    "weaknesses",
+                    []
+                ),
+                "recommendations": result.get(
+                    "recommendations",
+                    []
+                ),
+            }
+
+    except Exception as error:
+        print(
+            f"Feedback generation failed: {error}"
+        )
+
+    # Fallback feedback
+    scores = [
+        item.get("score", 0)
+        for item in history
+    ]
+
+    average = (
+        sum(scores) / len(scores)
+        if scores
+        else 0
+    )
+
+    return {
+        "overall_score": round(
+            average,
+            1
+        ),
+        "strengths": [],
+        "weaknesses": [],
+        "recommendations": [],
+    }
